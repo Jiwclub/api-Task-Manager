@@ -5,11 +5,21 @@ const { mongoose } = require("./db/mongoose");
 
 const bodyParser = require("body-parser");
 
+
 // Load in the mongoose model
 const { List, Task, User } = require("./db/models");
 
 // Load middleware ตัวกลาง
 app.use(bodyParser.json());
+const cors = (req, res, next) => {
+  res.header('Access-Control-Allow-Origin', "*");
+  res.header("Access-Control-Allow-Methods", "*");
+  res.header("Access-Control-Allow-Headers", "*");
+  next();
+};
+
+app.use(cors);
+
 
 // List Router
 // app.get('/',(req,res)=>{
