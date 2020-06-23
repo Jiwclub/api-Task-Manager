@@ -7,6 +7,7 @@ const bodyParser = require("body-parser");
 
 // Load in the mongoose model
 const { List, Task, User } = require("./db/models");
+const jwt = require("jsonwebtoken");
 
 //* middleware */
 
@@ -110,10 +111,10 @@ let verifySession = (req, res, next) => {
 //   res.send("Hello")
 // })
 
-app.get("/lists", (req, res) => {
+app.get("/lists", authenticate, (req, res) => {
   //   ดึงข้อมูลที่มีใน database มาแสดง
   List.find({
-    // _userId: req.user_id,
+    _userId: req.user_id,
   }).then((lists) => {
     res.send(lists);
   });
@@ -122,13 +123,13 @@ app.get("/lists", (req, res) => {
   // });
 });
 
-app.post("/lists", (req, res) => {
+app.post("/lists", authenticate, (req, res) => {
   // ส่งค่าแล้วเพิ่มข้อมูลลงใน database
   let title = req.body.title;
 
   let newList = new List({
     title,
-    // _userId: req.user_id
+    _userId: req.user_id,
   });
   newList.save().then((listDoc) => {
     // the full list document is returned (incl. id)
@@ -136,10 +137,10 @@ app.post("/lists", (req, res) => {
   });
 });
 
-app.patch("/lists/:id", (req, res) => {
+app.patch("/lists/:id", authenticate, (req, res) => {
   // อัพเดตข้อมูล
   List.findOneAndUpdate(
-    { _id: req.params.id },
+    { _id: req.params.id, _userId: req.user_id },
     {
       $set: req.body,
     }
@@ -148,19 +149,23 @@ app.patch("/lists/:id", (req, res) => {
   });
 });
 
-app.delete("/lists/:id", (req, res) => {
+app.delete("/lists/:id", authenticate, (req, res) => {
   // ลบข้อมูล
 
   List.findOneAndRemove({
     _id: req.params.id,
+    _userId: req.user_id,
   }).then((removdListDoc) => {
     res.send(removdListDoc);
+
+    // delete all the tasks that are in the deleted list
+    deleteTasksFromList(removedListDoc._id);
   });
 });
 
 // api ส่วน task
 
-app.get("/lists/:listId/tasks", (req, res) => {
+app.get("/lists/:listId/tasks", authenticate, (req, res) => {
   // We want to return all tasks that belong to a specific list (specified by listId)
   Task.find({
     _listId: req.params.listId,
@@ -170,7 +175,35 @@ app.get("/lists/:listId/tasks", (req, res) => {
 });
 
 // เพิ่ม task
-app.post("/lists/:listId/tasks", (req, res) => {
+app.post("/lists/:listId/tasks", authenticate, (req, res) => {
+  // We want to create a new task in a list specified by listId
+  List.findOne({
+    _id: req.params.listId,
+    _userId: req.user_id,
+  })
+    .then((list) => {
+      if (list) {
+        // list object with the specified conditions was found
+        // therefore the currently authenticated user can create new tasks
+        return true;
+      }
+      // else - the list object is undefined
+      return false;
+    })
+    .then((canCreateTask) => {
+      if (canCreateTask) {
+        let newTask = new Task({
+          title: req.body.title,
+          _listId: req.params.listId,
+        });
+        newTask.save().then((newTaskDoc) => {
+          res.send(newTaskDoc);
+        });
+      } else {
+        res.sendStatus(404);
+      }
+    });
+
   let newTask = new Task({
     title: req.body.title,
     _listId: req.params.listId,
@@ -181,28 +214,71 @@ app.post("/lists/:listId/tasks", (req, res) => {
 });
 
 // อัพเดต tasks
-app.patch("/lists/:listId/tasks/:taskId", (req, res) => {
-  Task.findOneAndUpdate(
-    {
-      _id: req.params.taskId,
-      _listId: req.params.listId,
-    },
-    {
-      $set: req.body,
-    }
-  ).then(() => {
-    res.send({ message: "Updated successfully." });
-  });
+app.patch("/lists/:listId/tasks/:taskId", authenticate, (req, res) => {
+  // We want to update an existing task (specified by taskId)
+
+  List.findOne({
+    _id: req.params.listId,
+    _userId: req.user_id,
+  })
+    .then((list) => {
+      if (list) {
+        // list object with the specified conditions was found
+        // therefore the currently authenticated user can make updates to tasks within this list
+        return true;
+      }
+
+      // else - the list object is undefined
+      return false;
+    })
+    .then((canUpdateTasks) => {
+      if (canUpdateTasks) {
+        // the currently authenticated user can update tasks
+        Task.findOneAndUpdate(
+          {
+            _id: req.params.taskId,
+            _listId: req.params.listId,
+          },
+          {
+            $set: req.body,
+          }
+        ).then(() => {
+          res.send({ message: "Updated successfully." });
+        });
+      } else {
+        res.sendStatus(404);
+      }
+    });
 });
 
 // ลบข้อมูล Task
-app.delete("/lists/:listId/tasks/:taskId", (req, res) => {
-  Task.findOneAndRemove({
-    _id: req.params.taskId,
-    _listId: req.params.listId,
-  }).then((removedTaskDoc) => {
-    res.send(removedTaskDoc);
-  });
+app.delete("/lists/:listId/tasks/:taskId", authenticate, (req, res) => {
+  List.findOne({
+    _id: req.params.listId,
+    _userId: req.user_id,
+  })
+    .then((list) => {
+      if (list) {
+        // list object with the specified conditions was found
+        // therefore the currently authenticated user can make updates to tasks within this list
+        return true;
+      }
+
+      // else - the list object is undefined
+      return false;
+    })
+    .then((canDeleteTasks) => {
+      if (canDeleteTasks) {
+        Task.findOneAndRemove({
+          _id: req.params.taskId,
+          _listId: req.params.listId,
+        }).then((removedTaskDoc) => {
+          res.send(removedTaskDoc);
+        });
+      } else {
+        res.sendStatus(404);
+      }
+    });
 });
 
 /* User Routes */
@@ -292,6 +368,15 @@ app.get("/users/me/access-token", verifySession, (req, res) => {
       res.status(400).send(e);
     });
 });
+
+/* HELPER METHODS */
+let deleteTasksFromList = (_listId) => {
+  Task.deleteMany({
+    _listId,
+  }).then(() => {
+    console.log("Tasks from " + _listId + " were deleted!");
+  });
+};
 
 app.listen(3000, () => {
   console.log("Sever is listening on port 3000");
